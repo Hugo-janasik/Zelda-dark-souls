@@ -1,35 +1,35 @@
-// internal/input/adapter.go - Adaptateur pour l'interface core
+// internal/input/adapter.go - Adaptateur corrigé pour l'interface core
 package input
 
-// InputManagerWrapper adapte InputManager pour l'interface core
-type InputManagerWrapper struct {
-	inputManager *InputManager
+// InputManagerWrapperFixed adapte InputManagerImpl pour l'interface core
+type InputManagerWrapperFixed struct {
+	inputManager *InputManagerImpl
 }
 
-// NewInputManagerWrapper crée un wrapper
-func NewInputManagerWrapper(im *InputManager) *InputManagerWrapper {
-	return &InputManagerWrapper{
+// NewInputManagerWrapperFixed crée un wrapper
+func NewInputManagerWrapperFixed(im *InputManagerImpl) *InputManagerWrapperFixed {
+	return &InputManagerWrapperFixed{
 		inputManager: im,
 	}
 }
 
 // Update met à jour l'input manager
-func (w *InputManagerWrapper) Update() {
+func (w *InputManagerWrapperFixed) Update() {
 	w.inputManager.Update()
 }
 
 // IsKeyJustPressed avec un int (interface core)
-func (w *InputManagerWrapper) IsKeyJustPressed(key int) bool {
+func (w *InputManagerWrapperFixed) IsKeyJustPressed(key int) bool {
 	return w.inputManager.IsKeyCorePressed(key)
 }
 
 // IsActionPressed avec un int (interface core)
-func (w *InputManagerWrapper) IsActionPressed(action int) bool {
+func (w *InputManagerWrapperFixed) IsActionPressed(action int) bool {
 	return w.inputManager.IsActionCorePressed(action)
 }
 
 // IsWindowCloseRequested (interface core)
-func (w *InputManagerWrapper) IsWindowCloseRequested() bool {
+func (w *InputManagerWrapperFixed) IsWindowCloseRequested() bool {
 	return w.inputManager.IsWindowCloseRequested()
 }
 

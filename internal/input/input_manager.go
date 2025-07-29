@@ -1,4 +1,4 @@
-// internal/input/input_manager.go - Gestionnaire d'entrées
+// internal/input/input_manager.go - Gestionnaire d'entrées corrigé
 package input
 
 import (
@@ -11,7 +11,7 @@ type GameConfig interface {
 	WindowHeight() int
 }
 
-// InputAction représente une action de jeu (copié de core pour éviter cycle)
+// InputAction représente une action de jeu (local pour éviter cycles)
 type InputAction int
 
 const (
@@ -42,7 +42,8 @@ const (
 	ActionCameraZoomOut
 )
 
-type InputManager struct {
+// InputManagerImpl implémentation concrète du gestionnaire d'entrées
+type InputManagerImpl struct {
 	config               GameConfig
 	keyPressed           map[ebiten.Key]bool
 	keyJustPressed       map[ebiten.Key]bool
@@ -52,8 +53,9 @@ type InputManager struct {
 	windowCloseRequested bool
 }
 
-func NewInputManager(config GameConfig) *InputManager {
-	return &InputManager{
+// NewInputManager crée un nouveau gestionnaire d'entrées
+func NewInputManager(config GameConfig) *InputManagerImpl {
+	return &InputManagerImpl{
 		config:          config,
 		keyPressed:      make(map[ebiten.Key]bool),
 		keyJustPressed:  make(map[ebiten.Key]bool),
@@ -62,7 +64,8 @@ func NewInputManager(config GameConfig) *InputManager {
 	}
 }
 
-func (im *InputManager) Update() {
+// Update met à jour les entrées
+func (im *InputManagerImpl) Update() {
 	// Mise à jour des touches
 	for key := ebiten.Key(0); key <= ebiten.KeyMax; key++ {
 		pressed := ebiten.IsKeyPressed(key)
@@ -80,24 +83,27 @@ func (im *InputManager) Update() {
 	im.windowCloseRequested = false
 }
 
-func (im *InputManager) IsKeyPressed(key ebiten.Key) bool {
+// IsKeyPressed vérifie si une touche est pressée
+func (im *InputManagerImpl) IsKeyPressed(key ebiten.Key) bool {
 	return im.keyPressed[key]
 }
 
-func (im *InputManager) IsKeyJustPressed(key ebiten.Key) bool {
+// IsKeyJustPressed vérifie si une touche vient d'être pressée
+func (im *InputManagerImpl) IsKeyJustPressed(key ebiten.Key) bool {
 	return im.keyJustPressed[key]
 }
 
 // Méthodes pour l'interface core (avec int au lieu d'ebiten.Key)
-func (im *InputManager) IsKeyCorePressed(key int) bool {
+func (im *InputManagerImpl) IsKeyCorePressed(key int) bool {
 	return im.keyJustPressed[ebiten.Key(key)]
 }
 
-func (im *InputManager) IsActionCorePressed(action int) bool {
+func (im *InputManagerImpl) IsActionCorePressed(action int) bool {
 	return im.IsActionPressed(InputAction(action))
 }
 
-func (im *InputManager) IsActionPressed(action InputAction) bool {
+// IsActionPressed vérifie si une action est pressée
+func (im *InputManagerImpl) IsActionPressed(action InputAction) bool {
 	// Mapping pour clavier français AZERTY et international
 	switch action {
 	case ActionPause:
@@ -122,7 +128,7 @@ func (im *InputManager) IsActionPressed(action InputAction) bool {
 }
 
 // IsMovementActionPressed vérifie si une action de mouvement spécifique est pressée
-func (im *InputManager) IsMovementActionPressed(action int) bool {
+func (im *InputManagerImpl) IsMovementActionPressed(action int) bool {
 	switch action {
 	case 0: // ActionMoveUp
 		return im.IsKeyPressed(ebiten.KeyW) || im.IsKeyPressed(ebiten.KeyZ)
@@ -137,8 +143,38 @@ func (im *InputManager) IsMovementActionPressed(action int) bool {
 	}
 }
 
-func (im *InputManager) IsWindowCloseRequested() bool {
+// IsWindowCloseRequested vérifie si la fenêtre doit se fermer
+func (im *InputManagerImpl) IsWindowCloseRequested() bool {
 	return im.windowCloseRequested
+}
+
+// Interface pour systems.InputManager
+func (im *InputManagerImpl) IsActionPressedSystems(action int) bool {
+	switch action {
+	case 0: // ActionMoveUp
+		return im.IsKeyPressed(ebiten.KeyW) || im.IsKeyPressed(ebiten.KeyZ)
+	case 1: // ActionMoveDown
+		return im.IsKeyPressed(ebiten.KeyS)
+	case 2: // ActionMoveLeft
+		return im.IsKeyPressed(ebiten.KeyA) || im.IsKeyPressed(ebiten.KeyQ)
+	case 3: // ActionMoveRight
+		return im.IsKeyPressed(ebiten.KeyD)
+	case 4: // ActionAttack
+		return im.IsKeyPressed(ebiten.KeySpace)
+	case 5: // ActionBlock
+		return im.IsKeyPressed(ebiten.KeyShiftLeft) || im.IsKeyPressed(ebiten.KeyShiftRight)
+	case 6: // ActionRoll
+		return im.IsKeyPressed(ebiten.KeyC)
+	case 8: // ActionInteract
+		return im.IsKeyPressed(ebiten.KeyE)
+	default:
+		return false
+	}
+}
+
+// IsKeyJustPressedSystems pour l'interface systems
+func (im *InputManagerImpl) IsKeyJustPressedSystems(key int) bool {
+	return im.IsKeyJustPressed(ebiten.Key(key))
 }
 
 // Constantes manquantes

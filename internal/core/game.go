@@ -277,14 +277,6 @@ func (g *Game) IsPaused() bool         { return g.Paused }
 func (g *Game) GetConfig() *GameConfig { return g.Config }
 func (g *Game) GetFPS() float64        { return g.FPS }
 
-// GetBuiltinStateManager retourne le StateManager intégré (si c'en est un)
-func (g *Game) GetBuiltinStateManager() interface{} {
-	if builtin, ok := g.stateManager.(*BuiltinStateManager); ok {
-		return builtin
-	}
-	return nil
-}
-
 // RequestExit demande l'arrêt
 func (g *Game) RequestExit() {
 	g.Running = false
@@ -305,4 +297,25 @@ func (g *Game) Cleanup() error {
 
 	log.Println("Nettoyage terminé")
 	return nil
+}
+
+// internal/core/game.go - Ajout des méthodes manquantes pour le StateManager
+// Ajoute ces méthodes à la fin de ton fichier game.go existant
+
+
+// Ajoute cette méthode à la fin de internal/core/game.go
+
+// GetBuiltinStateManager retourne le StateManager actuel
+func (g *Game) GetBuiltinStateManager() interface{} {
+	return g.stateManager
+}
+
+// GetStateManager retourne le StateManager actuel
+func (g *Game) GetStateManager() StateManager {
+	return g.stateManager
+}
+
+// SetEnhancedStateManager définit spécifiquement un EnhancedBuiltinStateManager
+func (g *Game) SetEnhancedStateManager(esm *EnhancedBuiltinStateManager) {
+	g.stateManager = esm
 }
