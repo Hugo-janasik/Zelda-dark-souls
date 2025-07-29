@@ -1,4 +1,4 @@
-// cmd/game/main.go - Version finale sans imports cycliques
+// cmd/game/main.go - Version avec support des sprites
 package main
 
 import (
@@ -15,18 +15,19 @@ import (
 	"zelda-souls-game/internal/save"
 )
 
-// FixedEbitenGame implémente l'interface ebiten.Game sans imports cycliques
-type FixedEbitenGame struct {
-	coreGame          *core.Game
-	config            *core.GameConfig
-	renderer          *rendering.Renderer
-	inputWrapper      *input.FinalInputWrapper
+// SpriteEbitenGame implémente l'interface ebiten.Game avec support des sprites
+type SpriteEbitenGame struct {
+	coreGame             *core.Game
+	config               *core.GameConfig
+	renderer             *rendering.Renderer
+	inputWrapper         *input.FinalInputWrapper
 	enhancedStateManager *core.EnhancedBuiltinStateManager
-	frameCount        int
+	spriteLoader         *assets.SpriteLoader // NOUVEAU
+	frameCount           int
 }
 
-// NewFixedEbitenGame crée le jeu sans imports cycliques
-func NewFixedEbitenGame() (*FixedEbitenGame, error) {
+// NewSpriteEbitenGame crée le jeu avec support des sprites
+func NewSpriteEbitenGame() (*SpriteEbitenGame, error) {
 	// Charger la configuration
 	config, err := core.LoadConfig("configs/game_config.yaml")
 	if err != nil {
@@ -34,8 +35,8 @@ func NewFixedEbitenGame() (*FixedEbitenGame, error) {
 		config = core.GetDefaultConfig()
 	}
 
-	config.GameTitle = "Zelda Souls Game - Système Joueur"
-	config.GameVersion = "0.2.0"
+	config.GameTitle = "Zelda Souls Game - Avec Sprites"
+	config.GameVersion = "0.3.0"
 
 	// Créer le renderer
 	renderer, err := rendering.NewRenderer(config)
@@ -46,6 +47,9 @@ func NewFixedEbitenGame() (*FixedEbitenGame, error) {
 	// Créer l'asset manager et save manager
 	assetManager := assets.NewAssetManager("assets")
 	saveManager := save.NewSaveManager("saves")
+
+	// Créer le sprite loader - NOUVEAU
+	spriteLoader := assets.NewSpriteLoader()
 
 	// Créer l'input manager et son wrapper
 	inputManager := input.NewInputManager(config)
@@ -89,65 +93,63 @@ func NewFixedEbitenGame() (*FixedEbitenGame, error) {
 	}
 	enhancedStateManager.SetHasSaves(hasSaves)
 
-	// Injecter les dépendances - CORRIGÉ SANS CAST D'INTERFACE
+	// Injecter les dépendances
 	coreGame.SetRenderer(renderer)
-	
-	// Ajouter la méthode SetEnhancedStateManager directement au core.Game
-	// Pour l'instant, utilisons SetStateManager normal
 	coreGame.SetStateManager(enhancedStateManager)
-	
 	coreGame.SetInputManager(inputWrapper)
 
 	// Configurer l'input wrapper pour communiquer avec le core
 	inputWrapper.SetCoreGame(coreGame)
 
-	// Injecter la caméra dans le système de joueur
+	// Injecter la caméra et le sprite loader dans le système de joueur - NOUVEAU
 	camera := renderer.GetCamera()
 	enhancedStateManager.SetCamera(camera)
 	enhancedStateManager.SetInputManager(inputWrapper)
+	enhancedStateManager.SetSpriteLoader(spriteLoader) // NOUVEAU
 
-	return &FixedEbitenGame{
+	return &SpriteEbitenGame{
 		coreGame:             coreGame,
 		config:               config,
 		renderer:             renderer,
 		inputWrapper:         inputWrapper,
 		enhancedStateManager: enhancedStateManager,
+		spriteLoader:         spriteLoader, // NOUVEAU
 		frameCount:           0,
 	}, nil
 }
 
 // Update implémente ebiten.Game.Update
-func (feg *FixedEbitenGame) Update() error {
-	feg.frameCount++
-	return feg.coreGame.Update()
+func (seg *SpriteEbitenGame) Update() error {
+	seg.frameCount++
+	return seg.coreGame.Update()
 }
 
 // Draw implémente ebiten.Game.Draw
-func (feg *FixedEbitenGame) Draw(screen *ebiten.Image) {
-	feg.coreGame.Render(screen)
+func (seg *SpriteEbitenGame) Draw(screen *ebiten.Image) {
+	seg.coreGame.Render(screen)
 }
 
 // Layout implémente ebiten.Game.Layout
-func (feg *FixedEbitenGame) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
-	return feg.config.WindowWidth(), feg.config.WindowHeight()
+func (seg *SpriteEbitenGame) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
+	return seg.config.WindowWidth(), seg.config.WindowHeight()
 }
 
 // GetBuiltinStateManager retourne le gestionnaire d'états pour l'input wrapper
-func (feg *FixedEbitenGame) GetBuiltinStateManager() interface{} {
-	return feg.enhancedStateManager // CORRIGÉ : retourne directement le bon StateManager
+func (seg *SpriteEbitenGame) GetBuiltinStateManager() interface{} {
+	return seg.enhancedStateManager
 }
 
 func main() {
-	fmt.Println("Zelda Souls Game - Système de Joueur Complet")
-	fmt.Println("===========================================")
+	fmt.Println("Zelda Souls Game - Système de Sprites")
+	fmt.Println("=====================================")
 
 	// Initialiser les répertoires
 	if err := initDirectories(); err != nil {
 		log.Printf("Attention: %v", err)
 	}
 
-	// Créer le jeu
-	game, err := NewFixedEbitenGame()
+	// Créer le jeu avec sprites
+	game, err := NewSpriteEbitenGame()
 	if err != nil {
 		log.Fatal("Erreur création jeu:", err)
 	}
@@ -161,29 +163,35 @@ func main() {
 	fmt.Printf("Lancement: %s v%s\n", config.GameTitle, config.GameVersion)
 	fmt.Printf("Résolution: %dx%d\n", config.WindowWidth(), config.WindowHeight())
 	fmt.Println("")
+	fmt.Println("=== SPRITES SUPPORTÉS ===")
+	fmt.Println("• assets/textures/player.png - Sprite principal")
+	fmt.Println("• assets/textures/up_idle - Animation idle vers le haut")
+	fmt.Println("• assets/textures/up_attack - Animation attaque vers le haut")
+	fmt.Println("• assets/textures/down_idle - Animation idle vers le bas")
+	fmt.Println("• assets/textures/down_attack - Animation attaque vers le bas")
+	fmt.Println("• assets/textures/left_idle - Animation idle vers la gauche")
+	fmt.Println("• assets/textures/left_attack - Animation attaque vers la gauche")
+	fmt.Println("• assets/textures/right_idle - Animation idle vers la droite")
+	fmt.Println("• assets/textures/right_attack - Animation attaque vers la droite")
+	fmt.Println("")
 	fmt.Println("=== CONTRÔLES ===")
 	fmt.Println("Menu:")
 	fmt.Println("• Souris - Navigation et clic")
 	fmt.Println("")
 	fmt.Println("Jeu:")
-	fmt.Println("• ZQSD ou WASD - Mouvement")
-	fmt.Println("• ESPACE - Attaque (coûte 15 stamina)")
+	fmt.Println("• ZQSD ou WASD - Mouvement (change l'animation)")
+	fmt.Println("• ESPACE - Attaque (animation d'attaque)")
 	fmt.Println("• C - Roulade (coûte 25 stamina)")
 	fmt.Println("• E - Interaction")
 	fmt.Println("• ESC - Retour au menu/Pause")
 	fmt.Println("• I - Toggle instructions")
 	fmt.Println("")
-	fmt.Println("=== CARACTÉRISTIQUES ===")
-	fmt.Println("• Joueur avec sprite et mouvement fluide")
-	fmt.Println("• Système de stamina avec régénération")
-	fmt.Println("• Caméra qui suit le joueur")
-	fmt.Println("• Barres de vie et stamina")
-	fmt.Println("• Indicateur de direction")
-	fmt.Println("• Animations de base (idle/marche)")
-	fmt.Println("• Système d'invulnérabilité")
-	fmt.Println("• Limites d'écran temporaires")
-	fmt.Println("• AUCUN IMPORT CYCLIQUE!")
-	fmt.Println("=================")
+	fmt.Println("=== SPRITES ===")
+	fmt.Println("• Le jeu chargera automatiquement les sprites depuis assets/textures/")
+	fmt.Println("• Si un sprite n'est pas trouvé, un sprite de fallback sera utilisé")
+	fmt.Println("• Les animations changent selon la direction et l'action")
+	fmt.Println("• Redimensionnement automatique 2x pour une meilleure visibilité")
+	fmt.Println("========================")
 	fmt.Println("")
 
 	// Lancer le jeu avec Ebiten
@@ -194,6 +202,11 @@ func main() {
 	// Cleanup à la fin
 	if err := game.coreGame.Cleanup(); err != nil {
 		log.Printf("Erreur cleanup: %v", err)
+	}
+	
+	// Cleanup des sprites
+	if game.spriteLoader != nil {
+		game.spriteLoader.Cleanup()
 	}
 }
 
@@ -206,6 +219,7 @@ func initDirectories() error {
 		"assets/textures/player",
 		"assets/textures/enemies",
 		"assets/textures/environment",
+		"assets/textures/ui",
 		"assets/sounds/sfx",
 		"assets/sounds/music",
 	}

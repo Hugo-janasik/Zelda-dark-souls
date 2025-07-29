@@ -407,6 +407,17 @@ func (esm *EnhancedBuiltinStateManager) IsPaused() bool {
 	return esm.currentState == "pause"
 }
 
+// SetSpriteLoader injecte le chargeur de sprites dans le système de joueur
+func (esm *EnhancedBuiltinStateManager) SetSpriteLoader(loader interface{}) {
+	// Injecter dans le PlayerSystem
+	if playerSystem := esm.playerSystem; playerSystem != nil {
+		if ps, ok := playerSystem.(interface{ SetSpriteLoader(interface{}) }); ok {
+			ps.SetSpriteLoader(loader)
+			fmt.Println("SpriteLoader injecté dans le PlayerSystem")
+		}
+	}
+}
+
 // ===============================
 // ADAPTATEUR DE RENDERER
 // ===============================
