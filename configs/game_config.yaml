@@ -1,0 +1,23 @@
+# Configuration par défaut pour Zelda Souls Game
+window:
+  width: 1280
+  height: 720
+  title: "Zelda Souls Game"
+  fullscreen: false
+  vsync: true
+
+rendering:
+  target_fps: 60
+  tile_size: 32
+  enable_batching: true
+  enable_culling: true
+
+audio:
+  master_volume: 1.0
+  music_volume: 0.7
+  sfx_volume: 0.8
+
+debug:
+  enable_debug: false
+  show_fps: false
+  show_colliders: false
