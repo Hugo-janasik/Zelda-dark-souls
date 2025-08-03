@@ -193,7 +193,7 @@ func (esm *EnhancedBuiltinStateManager) SetSpriteLoader(loader interface{}) {
 		fmt.Printf("⚠ Type inattendu pour SpriteLoader: %T\n", loader)
 	}
 
-	fmt.Println("=== Fin SetSpriteLoader ===\n")
+	fmt.Println("=== Fin SetSpriteLoader ===")
 }
 
 // startNewGame démarre une nouvelle partie
