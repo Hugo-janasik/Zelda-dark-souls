@@ -288,7 +288,7 @@ func (esm *EnhancedBuiltinStateManager) renderGameplayState(renderer Renderer) {
 	// Informations du joueur
 	esm.renderPlayerInfo(renderer)
 
-	// Rendre le joueur avec une adaptation d'interface
+	// Rendre le joueur avec une adaptation d'interface - CORRIGÉ
 	rendererAdapter := &RendererAdapter{coreRenderer: renderer}
 	esm.playerSystem.Render(rendererAdapter)
 
@@ -409,17 +409,15 @@ func (esm *EnhancedBuiltinStateManager) IsPaused() bool {
 
 // SetSpriteLoader injecte le chargeur de sprites dans le système de joueur
 func (esm *EnhancedBuiltinStateManager) SetSpriteLoader(loader interface{}) {
-	// Injecter dans le PlayerSystem
-	if playerSystem := esm.playerSystem; playerSystem != nil {
-		if ps, ok := playerSystem.(interface{ SetSpriteLoader(interface{}) }); ok {
-			ps.SetSpriteLoader(loader)
-			fmt.Println("SpriteLoader injecté dans le PlayerSystem")
-		}
+	// Injecter dans le PlayerSystem - CORRIGÉ
+	if esm.playerSystem != nil {
+		esm.playerSystem.SetSpriteLoader(loader)
+		fmt.Println("SpriteLoader injecté dans le PlayerSystem")
 	}
 }
 
 // ===============================
-// ADAPTATEUR DE RENDERER
+// ADAPTATEUR DE RENDERER - CORRIGÉ
 // ===============================
 
 // RendererAdapter adapte le renderer core vers l'interface systems
@@ -444,4 +442,29 @@ func (r *RendererAdapter) DrawText(text string, pos components.Vector2, color co
 	corePos := Vector2{X: pos.X, Y: pos.Y}
 	coreColor := Color{R: color.R, G: color.G, B: color.B, A: color.A}
 	r.coreRenderer.DrawText(text, corePos, coreColor)
+}
+
+// DrawSprite adapte l'appel de rendu de sprite - NOUVEAU
+func (r *RendererAdapter) DrawSprite(sprite interface{}, position components.Vector2, sourceRect components.Rectangle, scale components.Vector2, rotation float64, tint components.Color) {
+	// Pour l'instant, fallback vers un rectangle coloré
+	// Plus tard, on pourra implémenter le vrai rendu de sprite si le renderer le supporte
+	
+	// Calculer la taille du rectangle à partir du sourceRect et du scale
+	width := sourceRect.Width * scale.X
+	height := sourceRect.Height * scale.Y
+	
+	// Centrer le rectangle sur la position
+	rect := components.Rectangle{
+		X:      position.X - width/2,
+		Y:      position.Y - height/2,
+		Width:  width,
+		Height: height,
+	}
+	
+	// Dessiner comme un rectangle coloré pour l'instant
+	r.DrawRectangle(rect, tint, true)
+	
+	// Dessiner une bordure
+	borderColor := components.Color{255, 255, 255, 255}
+	r.DrawRectangle(rect, borderColor, false)
 }
