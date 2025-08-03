@@ -1,4 +1,4 @@
-// internal/assets/sprite_loader.go - Système de chargement de sprites
+// internal/assets/sprite_loader.go - Système de chargement de sprites complet
 package assets
 
 import (
@@ -10,15 +10,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 )
-
-// SpriteSheet représente une feuille de sprites
-type SpriteSheet struct {
-	Image      *ebiten.Image
-	TileWidth  int
-	TileHeight int
-	Columns    int
-	Rows       int
-}
 
 // SpriteAnimation représente une animation de sprites
 type SpriteAnimation struct {
@@ -41,6 +32,11 @@ type PlayerSpriteSet struct {
 
 	// Sprite principal
 	MainSprite *ebiten.Image
+
+	// Métadonnées
+	SpriteWidth  int
+	SpriteHeight int
+	Loaded       bool
 }
 
 // SpriteLoader gère le chargement des sprites
@@ -72,142 +68,165 @@ func (sl *SpriteLoader) LoadImage(path string) (*ebiten.Image, error) {
 	// Mettre en cache
 	sl.loadedImages[path] = img
 
-	fmt.Printf("Image chargée: %s (%dx%d)\n", path, img.Bounds().Dx(), img.Bounds().Dy())
+	fmt.Printf("✓ Image chargée: %s (%dx%d)\n", path, img.Bounds().Dx(), img.Bounds().Dy())
 	return img, nil
 }
 
 // LoadPlayerSprites charge tous les sprites du joueur
 func (sl *SpriteLoader) LoadPlayerSprites(assetsDir string) (*PlayerSpriteSet, error) {
-	if sl.playerSprites != nil {
-		return sl.playerSprites, nil // Déjà chargé
+	if sl.playerSprites != nil && sl.playerSprites.Loaded {
+		fmt.Println("Sprites joueur déjà chargés, réutilisation du cache")
+		return sl.playerSprites, nil
 	}
 
-	fmt.Println("Chargement des sprites du joueur...")
+	fmt.Println("=== CHARGEMENT DES SPRITES JOUEUR ===")
 
 	playerSprites := &PlayerSpriteSet{}
 
-	// Charger le sprite principal
-	mainSpritePath := filepath.Join(assetsDir, "textures/player", "player.png")
+	// 1. Charger le sprite principal
+	mainSpritePath := filepath.Join(assetsDir, "textures", "player", "player.png")
+	fmt.Printf("Tentative de chargement: %s\n", mainSpritePath)
+
 	mainSprite, err := sl.LoadImage(mainSpritePath)
 	if err != nil {
-		fmt.Printf("Attention: impossible de charger le sprite principal: %v\n", err)
-		// Créer un sprite de fallback
+		fmt.Printf("⚠ Impossible de charger le sprite principal: %v\n", err)
+		fmt.Println("Création d'un sprite de fallback...")
 		mainSprite = sl.createFallbackSprite(32, 32)
 	}
 	playerSprites.MainSprite = mainSprite
 
-	// Charger les animations par direction et état
-	directions := []struct {
-		name      string
-		animation **SpriteAnimation
-	}{
-		{"up_idle", &playerSprites.UpIdle},
-		{"up_attack", &playerSprites.UpAttack},
-		{"down_idle", &playerSprites.DownIdle},
-		{"down_attack", &playerSprites.DownAttack},
-		{"left_idle", &playerSprites.LeftIdle},
-		{"left_attack", &playerSprites.LeftAttack},
-		{"right_idle", &playerSprites.RightIdle},
-		{"right_attack", &playerSprites.RightAttack},
+	// Déterminer la taille du sprite
+	bounds := mainSprite.Bounds()
+	playerSprites.SpriteWidth = bounds.Dx()
+	playerSprites.SpriteHeight = bounds.Dy()
+
+	fmt.Printf("Sprite principal configuré: %dx%d\n", playerSprites.SpriteWidth, playerSprites.SpriteHeight)
+
+	// 2. Créer les animations de base à partir du sprite principal
+	fmt.Println("Création des animations de base...")
+
+	baseAnimation := &SpriteAnimation{
+		Frames: []image.Rectangle{
+			image.Rect(0, 0, playerSprites.SpriteWidth, playerSprites.SpriteHeight),
+		},
+		FrameTime: 0.5,
+		Loop:      true,
 	}
 
-	for _, dir := range directions {
-		animation, err := sl.loadPlayerAnimation(assetsDir, dir.name)
-		if err != nil {
-			fmt.Printf("Attention: %v - utilisation d'animation par défaut\n", err)
-			*dir.animation = sl.createDefaultAnimation()
-		} else {
-			*dir.animation = animation
-		}
+	attackAnimation := &SpriteAnimation{
+		Frames: []image.Rectangle{
+			image.Rect(0, 0, playerSprites.SpriteWidth, playerSprites.SpriteHeight),
+		},
+		FrameTime: 0.2,
+		Loop:      false,
 	}
 
+	// Assigner les animations (temporairement identiques)
+	playerSprites.UpIdle = baseAnimation
+	playerSprites.UpAttack = attackAnimation
+	playerSprites.DownIdle = baseAnimation
+	playerSprites.DownAttack = attackAnimation
+	playerSprites.LeftIdle = baseAnimation
+	playerSprites.LeftAttack = attackAnimation
+	playerSprites.RightIdle = baseAnimation
+	playerSprites.RightAttack = attackAnimation
+
+	// 3. Essayer de charger les sprites spécifiques par direction (optionnel)
+	sl.tryLoadDirectionalSprites(assetsDir, playerSprites)
+
+	// 4. Marquer comme chargé
+	playerSprites.Loaded = true
 	sl.playerSprites = playerSprites
-	fmt.Println("Sprites du joueur chargés avec succès!")
+
+	fmt.Println("✓ Sprites du joueur chargés avec succès!")
+	fmt.Printf("  - Sprite principal: %dx%d\n", playerSprites.SpriteWidth, playerSprites.SpriteHeight)
+	fmt.Printf("  - Animations configurées: 8 (idle + attack pour 4 directions)\n")
+
 	return playerSprites, nil
 }
 
-// loadPlayerAnimation charge une animation spécifique du joueur
-func (sl *SpriteLoader) loadPlayerAnimation(assetsDir, animationName string) (*SpriteAnimation, error) {
-	// Construire le chemin du fichier
-	spritePath := filepath.Join(assetsDir, "textures", animationName)
+// tryLoadDirectionalSprites essaie de charger les sprites directionnels spécifiques
+func (sl *SpriteLoader) tryLoadDirectionalSprites(assetsDir string, playerSprites *PlayerSpriteSet) {
+	fmt.Println("Tentative de chargement des sprites directionnels...")
 
-	// Charger l'image
-	img, err := sl.LoadImage(spritePath)
-	if err != nil {
-		return nil, fmt.Errorf("impossible de charger l'animation %s: %v", animationName, err)
+	// Liste des fichiers à essayer de charger
+	spriteFiles := map[string]**SpriteAnimation{
+		"up/idle_up.png":            &playerSprites.UpIdle,
+		"up_idle/idle_up.png":       &playerSprites.UpIdle,
+		"down/idle_down.png":        &playerSprites.DownIdle,
+		"down_idle/idle_down.png":   &playerSprites.DownIdle,
+		"left/idle_left.png":        &playerSprites.LeftIdle,
+		"left_idle/idle_left.png":   &playerSprites.LeftIdle,
+		"right/idle_right.png":      &playerSprites.RightIdle,
+		"right_idle/idle_right.png": &playerSprites.RightIdle,
 	}
 
-	// Déterminer le nombre de frames selon le nom
-	var frameCount int
-	var frameTime float64
+	loadedCount := 0
+	for relativePath, animationPtr := range spriteFiles {
+		fullPath := filepath.Join(assetsDir, "textures", "player", relativePath)
 
-	if filepath.Ext(animationName) == "" {
-		// C'est un dossier, chercher des fichiers individuels
-		return sl.loadAnimationFromFiles(spritePath)
+		if sprite, err := sl.LoadImage(fullPath); err == nil {
+			// Créer une animation avec ce sprite spécifique
+			*animationPtr = &SpriteAnimation{
+				Frames: []image.Rectangle{
+					image.Rect(0, 0, sprite.Bounds().Dx(), sprite.Bounds().Dy()),
+				},
+				FrameTime: 0.5,
+				Loop:      true,
+			}
+			loadedCount++
+			fmt.Printf("  ✓ Sprite directionnel chargé: %s\n", relativePath)
+		}
 	}
 
-	// C'est un fichier unique, supposer que c'est une spritesheet
-	switch {
-	case contains(animationName, "attack"):
-		frameCount = 3  // 3 frames pour l'attaque
-		frameTime = 0.1 // 100ms par frame
-	case contains(animationName, "idle"):
-		frameCount = 1  // 1 frame pour idle
-		frameTime = 1.0 // 1 seconde
-	default:
-		frameCount = 1
-		frameTime = 0.2
-	}
-
-	// Créer les rectangles des frames
-	frameWidth := img.Bounds().Dx() / frameCount
-	frameHeight := img.Bounds().Dy()
-
-	frames := make([]image.Rectangle, frameCount)
-	for i := 0; i < frameCount; i++ {
-		frames[i] = image.Rect(
-			i*frameWidth, 0,
-			(i+1)*frameWidth, frameHeight,
-		)
-	}
-
-	return &SpriteAnimation{
-		Frames:    frames,
-		FrameTime: frameTime,
-		Loop:      contains(animationName, "idle"), // Loop seulement pour idle
-	}, nil
-}
-
-// loadAnimationFromFiles charge une animation depuis plusieurs fichiers
-func (sl *SpriteLoader) loadAnimationFromFiles(dirPath string) (*SpriteAnimation, error) {
-	// Pour l'instant, retourner une animation par défaut
-	// TODO: Implémenter le chargement depuis plusieurs fichiers
-	return sl.createDefaultAnimation(), nil
-}
-
-// createDefaultAnimation crée une animation par défaut
-func (sl *SpriteLoader) createDefaultAnimation() *SpriteAnimation {
-	return &SpriteAnimation{
-		Frames: []image.Rectangle{
-			image.Rect(0, 0, 32, 32), // Frame unique
-		},
-		FrameTime: 0.2,
-		Loop:      true,
+	if loadedCount > 0 {
+		fmt.Printf("✓ %d sprites directionnels chargés\n", loadedCount)
+	} else {
+		fmt.Println("  → Aucun sprite directionnel trouvé, utilisation du sprite principal")
 	}
 }
 
 // createFallbackSprite crée un sprite de secours
 func (sl *SpriteLoader) createFallbackSprite(width, height int) *ebiten.Image {
+	fmt.Printf("Création d'un sprite de fallback %dx%d\n", width, height)
+
 	img := ebiten.NewImage(width, height)
 
-	// Dessiner un rectangle coloré simple
-	img.Fill(color.RGBA{100, 150, 255, 255}) // Bleu
+	// Dessiner un rectangle coloré avec des détails
+	img.Fill(color.RGBA{100, 150, 255, 255}) // Bleu de base
+
+	// Ajouter quelques détails pour le rendre reconnaissable
+	// Dessiner une bordure
+	borderColor := color.RGBA{80, 120, 200, 255}
+
+	// Bordure simple (pixels du bord)
+	for x := 0; x < width; x++ {
+		img.Set(x, 0, borderColor)        // Haut
+		img.Set(x, height-1, borderColor) // Bas
+	}
+	for y := 0; y < height; y++ {
+		img.Set(0, y, borderColor)       // Gauche
+		img.Set(width-1, y, borderColor) // Droite
+	}
+
+	// Ajouter un point central
+	centerColor := color.RGBA{255, 255, 255, 255}
+	centerX, centerY := width/2, height/2
+	img.Set(centerX, centerY, centerColor)
+	img.Set(centerX-1, centerY, centerColor)
+	img.Set(centerX+1, centerY, centerColor)
+	img.Set(centerX, centerY-1, centerColor)
+	img.Set(centerX, centerY+1, centerColor)
 
 	return img
 }
 
 // GetPlayerAnimation retourne l'animation appropriée selon l'état
 func (pss *PlayerSpriteSet) GetPlayerAnimation(direction string, isAttacking bool) *SpriteAnimation {
+	if !pss.Loaded {
+		return nil
+	}
+
 	switch direction {
 	case "up":
 		if isAttacking {
@@ -242,23 +261,88 @@ func (pss *PlayerSpriteSet) GetPlayerAnimation(direction string, isAttacking boo
 	}
 }
 
-// Fonction utilitaire pour vérifier si une string contient un substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[len(s)-len(substr):] == substr ||
-		len(s) > len(substr) && s[:len(substr)] == substr ||
-		(len(s) > len(substr) && len(s) > 0 &&
-			func() bool {
-				for i := 0; i <= len(s)-len(substr); i++ {
-					if s[i:i+len(substr)] == substr {
-						return true
-					}
-				}
-				return false
-			}())
+// GetSpriteForAnimation retourne le sprite approprié pour une animation donnée
+func (pss *PlayerSpriteSet) GetSpriteForAnimation(direction string, isMoving bool, isAttacking bool, frameIndex int) *ebiten.Image {
+	if !pss.Loaded {
+		return nil
+	}
+
+	// Pour l'instant, toujours retourner le sprite principal
+	// TODO: Implémenter la sélection de frame dans les animations
+	animation := pss.GetPlayerAnimation(direction, isAttacking)
+	if animation != nil && len(animation.Frames) > 0 {
+		// Pour l'instant, on retourne toujours le sprite principal
+		// car toutes nos animations utilisent le même sprite de base
+		return pss.MainSprite
+	}
+
+	return pss.MainSprite
+}
+
+// GetSpriteSize retourne la taille des sprites
+func (pss *PlayerSpriteSet) GetSpriteSize() (int, int) {
+	return pss.SpriteWidth, pss.SpriteHeight
+}
+
+// IsLoaded vérifie si les sprites sont chargés
+func (pss *PlayerSpriteSet) IsLoaded() bool {
+	return pss.Loaded && pss.MainSprite != nil
+}
+
+// GetMainSprite retourne le sprite principal
+func (pss *PlayerSpriteSet) GetMainSprite() *ebiten.Image {
+	return pss.MainSprite
 }
 
 // Cleanup libère les ressources
 func (sl *SpriteLoader) Cleanup() {
-	sl.loadedImages = nil
+	fmt.Println("Nettoyage SpriteLoader...")
+
+	// Vider le cache d'images
+	for path := range sl.loadedImages {
+		delete(sl.loadedImages, path)
+	}
+
+	// Réinitialiser les sprites du joueur
 	sl.playerSprites = nil
+
+	fmt.Println("✓ SpriteLoader nettoyé")
+}
+
+// GetLoadedImageCount retourne le nombre d'images chargées
+func (sl *SpriteLoader) GetLoadedImageCount() int {
+	return len(sl.loadedImages)
+}
+
+// ReloadPlayerSprites force le rechargement des sprites du joueur
+func (sl *SpriteLoader) ReloadPlayerSprites(assetsDir string) (*PlayerSpriteSet, error) {
+	fmt.Println("Rechargement forcé des sprites du joueur...")
+	sl.playerSprites = nil
+	return sl.LoadPlayerSprites(assetsDir)
+}
+
+// CreateTestSprite crée un sprite de test pour le développement
+func (sl *SpriteLoader) CreateTestSprite(width, height int, baseColor color.RGBA) *ebiten.Image {
+	img := ebiten.NewImage(width, height)
+	img.Fill(baseColor)
+
+	// Ajouter des détails de test
+	borderColor := color.RGBA{
+		R: uint8(int(baseColor.R) * 8 / 10),
+		G: uint8(int(baseColor.G) * 8 / 10),
+		B: uint8(int(baseColor.B) * 8 / 10),
+		A: baseColor.A,
+	}
+
+	// Bordure
+	for x := 0; x < width; x++ {
+		img.Set(x, 0, borderColor)
+		img.Set(x, height-1, borderColor)
+	}
+	for y := 0; y < height; y++ {
+		img.Set(0, y, borderColor)
+		img.Set(width-1, y, borderColor)
+	}
+
+	return img
 }

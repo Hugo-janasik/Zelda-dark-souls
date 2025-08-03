@@ -124,10 +124,10 @@ type GameplayState struct {
 	world         *world.World
 	systemManager *systems.SystemsManager
 	uiManager     *ui.UIManager
-	inputManager  *input.InputManager
+	inputManager  *input.InputManagerImpl
 }
 
-func NewGameplayState(config GameConfig, world *world.World, systemManager *systems.SystemsManager, uiManager *ui.UIManager, inputManager *input.InputManager) *GameplayState {
+func NewGameplayState(config GameConfig, world *world.World, systemManager *systems.SystemsManager, uiManager *ui.UIManager, inputManager *input.InputManagerImpl) *GameplayState {
 	return &GameplayState{
 		config:        config,
 		world:         world,

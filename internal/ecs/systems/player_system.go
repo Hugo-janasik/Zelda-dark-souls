@@ -1,15 +1,61 @@
-// internal/ecs/systems/player_system.go - Système de joueur avec support des sprites
+// internal/ecs/systems/player_system.go - Système de joueur avec support des sprites complet
 package systems
 
 import (
 	"fmt"
+	"image"
 	"math"
 	"time"
 	"zelda-souls-game/internal/ecs/components"
+
+	"github.com/hajimehoshi/ebiten/v2"
 )
 
 // ===============================
-// INTERFACES MINIMALES CORRIGÉES
+// TYPES COMPATIBLES AVEC ASSETS
+// ===============================
+
+// SpriteAnimation compatible avec assets/sprite_loader.go
+type SpriteAnimation struct {
+	Frames    []image.Rectangle
+	FrameTime float64
+	Loop      bool
+}
+
+// PlayerSpriteSet compatible avec assets/sprite_loader.go
+type PlayerSpriteSet struct {
+	// Sprites par direction et état
+	UpIdle      *SpriteAnimation
+	UpAttack    *SpriteAnimation
+	DownIdle    *SpriteAnimation
+	DownAttack  *SpriteAnimation
+	LeftIdle    *SpriteAnimation
+	LeftAttack  *SpriteAnimation
+	RightIdle   *SpriteAnimation
+	RightAttack *SpriteAnimation
+
+	// Sprite principal
+	MainSprite *ebiten.Image
+
+	// Métadonnées
+	SpriteWidth  int
+	SpriteHeight int
+	Loaded       bool
+}
+
+// GetSpriteForAnimation retourne le sprite approprié
+func (pss *PlayerSpriteSet) GetSpriteForAnimation(direction string, isMoving bool, isAttacking bool, frameIndex int) *ebiten.Image {
+	if !pss.Loaded || pss.MainSprite == nil {
+		return nil
+	}
+
+	// Pour l'instant, toujours retourner le sprite principal
+	// TODO: Implémenter la sélection de frame dans les animations
+	return pss.MainSprite
+}
+
+// ===============================
+// INTERFACES MINIMALES
 // ===============================
 
 // InputManager interface minimale pour éviter les cycles
@@ -18,11 +64,11 @@ type InputManager interface {
 	IsKeyJustPressedSystems(key int) bool
 }
 
-// Renderer interface minimale pour le rendu (utilise les types components)
+// Renderer interface minimale pour le rendu
 type Renderer interface {
 	DrawRectangle(rect components.Rectangle, color components.Color, filled bool)
 	DrawText(text string, pos components.Vector2, color components.Color)
-	DrawSprite(sprite interface{}, position components.Vector2, sourceRect components.Rectangle, scale components.Vector2, rotation float64, tint components.Color) // NOUVEAU
+	DrawSprite(sprite interface{}, position components.Vector2, sourceRect components.Rectangle, scale components.Vector2, rotation float64, tint components.Color)
 }
 
 // Camera interface pour la caméra
@@ -31,9 +77,9 @@ type Camera interface {
 	FollowTarget(target interface{}, speed float64, offset components.Vector2)
 }
 
-// SpriteLoader interface pour charger les sprites
+// SpriteLoader interface compatible avec assets/sprite_loader.go
 type SpriteLoader interface {
-	LoadPlayerSprites(assetsDir string) (interface{}, error) // Retourne *PlayerSpriteSet
+	LoadPlayerSprites(assetsDir string) (*PlayerSpriteSet, error)
 }
 
 // ===============================
@@ -43,21 +89,21 @@ type SpriteLoader interface {
 // PlayerEntity représente l'entité joueur complète avec sprites
 type PlayerEntity struct {
 	// Composants
-	Position      *components.PositionComponent
-	Movement      *components.MovementComponent
-	Sprite        *components.SpriteComponent
-	SpriteRenderer *components.SpriteRendererComponent // NOUVEAU
-	Animation     *components.AnimationComponent
-	Collider      *components.ColliderComponent
-	Player        *components.PlayerComponent
-	Input         *components.InputComponent
-	
+	Position       *components.PositionComponent
+	Movement       *components.MovementComponent
+	Sprite         *components.SpriteComponent
+	SpriteRenderer *components.SpriteRendererComponent
+	Animation      *components.AnimationComponent
+	Collider       *components.ColliderComponent
+	Player         *components.PlayerComponent
+	Input          *components.InputComponent
+
 	// État interne
-	EntityID      uint32
-	Active        bool
-	
-	// Sprites
-	PlayerSprites interface{} // *PlayerSpriteSet
+	EntityID uint32
+	Active   bool
+
+	// Sprites (interface pour compatibilité)
+	PlayerSprites interface{} // Sera *PlayerSpriteSet de assets
 }
 
 // NewPlayerEntity crée une nouvelle entité joueur avec sprites
@@ -66,7 +112,7 @@ func NewPlayerEntity(x, y float64) *PlayerEntity {
 		Position:       components.NewPositionComponent(x, y),
 		Movement:       components.NewMovementComponent(200.0, 250.0),
 		Sprite:         components.NewSpriteComponent("player", 32, 32),
-		SpriteRenderer: components.NewSpriteRendererComponent(), // NOUVEAU
+		SpriteRenderer: components.NewSpriteRendererComponent(),
 		Animation:      components.NewAnimationComponent(),
 		Collider:       components.NewColliderComponent(24, 24, components.LayerPlayer),
 		Player:         components.NewPlayerComponent(),
@@ -74,20 +120,23 @@ func NewPlayerEntity(x, y float64) *PlayerEntity {
 		EntityID:       1,
 		Active:         true,
 	}
-	
+
 	// Configuration du sprite renderer
 	entity.SpriteRenderer.Position = components.Vector2{X: x, Y: y}
 	entity.SpriteRenderer.Scale = components.Vector2{X: 2.0, Y: 2.0} // Agrandir 2x
 	entity.SpriteRenderer.Layer = 10
-	
+	entity.SpriteRenderer.Visible = true
+
 	// Configuration du sprite de fallback
 	entity.Sprite.Layer = 10
 	entity.Sprite.Color = components.Color{100, 150, 255, 255}
+	entity.Sprite.Visible = true
 	entity.Collider.Offset = components.Vector2{X: 0, Y: 4}
-	
+
 	// Initialiser les animations de fallback
 	entity.setupAnimations()
-	
+
+	fmt.Printf("✓ PlayerEntity créé à (%.1f, %.1f)\n", x, y)
 	return entity
 }
 
@@ -104,7 +153,7 @@ func (pe *PlayerEntity) setupAnimations() {
 		PlayRate: 1.0,
 	}
 	pe.Animation.AddAnimation("idle", idleAnim)
-	
+
 	// Animation de marche
 	walkFrames := []components.AnimationFrame{
 		{SourceRect: components.Rectangle{X: 0, Y: 0, Width: 32, Height: 32}, Duration: time.Millisecond * 200},
@@ -119,14 +168,14 @@ func (pe *PlayerEntity) setupAnimations() {
 		PlayRate: 1.5,
 	}
 	pe.Animation.AddAnimation("walk", walkAnim)
-	
+
 	pe.Animation.Play("idle")
 }
 
 // SetPlayerSprites définit les sprites du joueur
 func (pe *PlayerEntity) SetPlayerSprites(sprites interface{}) {
 	pe.PlayerSprites = sprites
-	fmt.Println("Sprites du joueur configurés sur l'entité")
+	fmt.Printf("✓ PlayerEntity.SetPlayerSprites appelé avec type: %T\n", sprites)
 }
 
 // GetPosition implémente l'interface Positionable pour PlayerEntity
@@ -145,72 +194,137 @@ func (pe *PlayerEntity) GetVelocity() components.Vector2 {
 
 // PlayerSystem gère la logique du joueur avec support des sprites
 type PlayerSystem struct {
-	player       *PlayerEntity
-	inputManager InputManager
-	camera       Camera
-	spriteLoader SpriteLoader
+	player        *PlayerEntity
+	inputManager  InputManager
+	camera        Camera
+	spriteLoader  SpriteLoader
 	spritesLoaded bool
+	frameCount    int
 }
 
 // NewPlayerSystem crée un nouveau système joueur
 func NewPlayerSystem() *PlayerSystem {
+	fmt.Println("✓ PlayerSystem créé")
 	return &PlayerSystem{
 		player:        nil,
 		spritesLoaded: false,
+		frameCount:    0,
 	}
 }
 
 // SetInputManager injecte le gestionnaire d'entrées
 func (ps *PlayerSystem) SetInputManager(inputManager interface{}) {
+	fmt.Printf("PlayerSystem.SetInputManager appelé avec: %T\n", inputManager)
+
 	if im, ok := inputManager.(InputManager); ok {
 		ps.inputManager = im
+		fmt.Println("✓ InputManager injecté dans PlayerSystem")
+	} else {
+		fmt.Printf("⚠ Type InputManager incompatible: %T\n", inputManager)
 	}
 }
 
 // SetCamera injecte la caméra
 func (ps *PlayerSystem) SetCamera(camera interface{}) {
+	fmt.Printf("PlayerSystem.SetCamera appelé avec: %T\n", camera)
+
 	if cam, ok := camera.(Camera); ok {
 		ps.camera = cam
+		fmt.Println("✓ Camera injectée dans PlayerSystem")
+	} else {
+		fmt.Printf("⚠ Type Camera incompatible: %T\n", camera)
 	}
 }
 
 // SetSpriteLoader injecte le chargeur de sprites
 func (ps *PlayerSystem) SetSpriteLoader(loader interface{}) {
+	fmt.Printf("\n=== PlayerSystem.SetSpriteLoader appelé ===\n")
+	fmt.Printf("Type du loader: %T\n", loader)
+
 	if sl, ok := loader.(SpriteLoader); ok {
 		ps.spriteLoader = sl
+		fmt.Println("✓ SpriteLoader correctement assigné au PlayerSystem")
+
+		// Forcer le chargement immédiatement si on a déjà un joueur
+		if ps.player != nil {
+			fmt.Println("Joueur existant détecté, chargement immédiat des sprites...")
+			ps.loadPlayerSprites()
+		} else {
+			fmt.Println("Aucun joueur encore créé, chargement différé")
+		}
+	} else {
+		fmt.Printf("⚠ ERREUR: Type incompatible pour SpriteLoader. Attendu: SpriteLoader, reçu: %T\n", loader)
 	}
+
+	fmt.Println("=== Fin PlayerSystem.SetSpriteLoader ===\n")
 }
 
 // CreatePlayer crée l'entité joueur avec sprites
 func (ps *PlayerSystem) CreatePlayer(x, y float64) {
+	fmt.Printf("\n=== CreatePlayer appelé à (%.1f, %.1f) ===\n", x, y)
+
 	ps.player = NewPlayerEntity(x, y)
-	
-	// Charger les sprites si le loader est disponible
+
+	// Vérifier l'état du spriteLoader
+	fmt.Printf("SpriteLoader disponible: %t\n", ps.spriteLoader != nil)
+	fmt.Printf("SpritesLoaded: %t\n", ps.spritesLoaded)
+
+	// Charger les sprites si le loader est disponible ET pas encore chargé
 	if ps.spriteLoader != nil && !ps.spritesLoaded {
+		fmt.Println("Chargement des sprites depuis CreatePlayer...")
+		ps.loadPlayerSprites()
+	} else if ps.spriteLoader == nil {
+		fmt.Println("⚠ SpriteLoader non disponible dans CreatePlayer")
+	} else if ps.spritesLoaded {
+		fmt.Println("Sprites déjà chargés, ré-assignation au nouveau joueur...")
+		// Les sprites sont déjà chargés, mais on doit les ré-assigner
 		ps.loadPlayerSprites()
 	}
-	
-	fmt.Printf("Joueur créé à la position (%.1f, %.1f)\n", x, y)
+
+	fmt.Printf("Joueur créé - PlayerSprites: %t\n", ps.player.PlayerSprites != nil)
+	fmt.Println("=== Fin CreatePlayer ===")
 }
 
 // loadPlayerSprites charge les sprites du joueur
 func (ps *PlayerSystem) loadPlayerSprites() {
+	fmt.Println("\n=== loadPlayerSprites appelé ===")
+
 	if ps.spriteLoader == nil {
-		fmt.Println("Pas de SpriteLoader disponible, utilisation des sprites de fallback")
+		fmt.Println("⚠ ERREUR: SpriteLoader est nil!")
 		return
 	}
-	
+
+	fmt.Printf("SpriteLoader disponible: %T\n", ps.spriteLoader)
+
 	sprites, err := ps.spriteLoader.LoadPlayerSprites("assets")
 	if err != nil {
-		fmt.Printf("Erreur chargement sprites: %v\n", err)
+		fmt.Printf("⚠ ERREUR chargement sprites: %v\n", err)
 		return
 	}
-	
+
+	fmt.Printf("✓ Sprites chargés avec succès! Type: %T\n", sprites)
+	fmt.Printf("  - MainSprite disponible: %t\n", sprites.MainSprite != nil)
+	if sprites.MainSprite != nil {
+		bounds := sprites.MainSprite.Bounds()
+		fmt.Printf("  - Taille sprite: %dx%d\n", bounds.Dx(), bounds.Dy())
+	}
+
 	if ps.player != nil {
 		ps.player.SetPlayerSprites(sprites)
+		fmt.Println("✓ Sprites assignés au joueur")
+
+		// Vérification
+		if ps.player.PlayerSprites != nil {
+			fmt.Println("✓ Vérification: player.PlayerSprites est maintenant défini")
+		} else {
+			fmt.Println("⚠ ERREUR: player.PlayerSprites est toujours nil après assignation!")
+		}
+	} else {
+		fmt.Println("⚠ ERREUR: Joueur est nil, impossible d'assigner les sprites")
 	}
-	
+
 	ps.spritesLoaded = true
+	fmt.Println("=== Fin loadPlayerSprites ===")
 }
 
 // GetPlayer retourne l'entité joueur
@@ -231,16 +345,33 @@ func (ps *PlayerSystem) Update(deltaTime time.Duration) {
 	if ps.player == nil || !ps.player.Active {
 		return
 	}
-	
-	// Charger les sprites si pas encore fait
+
+	ps.frameCount++
+
+	// Forcer le chargement des sprites si pas encore fait
 	if !ps.spritesLoaded && ps.spriteLoader != nil {
+		if ps.frameCount%60 == 0 { // Toutes les secondes
+			fmt.Printf("Frame %d: Tentative de chargement des sprites...\n", ps.frameCount)
+		}
 		ps.loadPlayerSprites()
 	}
-	
+
+	// Si toujours pas de sprites après 120 frames (2 secondes), afficher un message d'erreur
+	if ps.frameCount == 120 && ps.player.PlayerSprites == nil {
+		fmt.Println("\n⚠ ATTENTION: Aucun sprite chargé après 2 secondes!")
+		fmt.Printf("  - SpriteLoader: %t\n", ps.spriteLoader != nil)
+		fmt.Printf("  - SpritesLoaded: %t\n", ps.spritesLoaded)
+		fmt.Printf("  - Player: %t\n", ps.player != nil)
+		if ps.player != nil {
+			fmt.Printf("  - PlayerSprites: %t\n", ps.player.PlayerSprites != nil)
+		}
+		fmt.Println()
+	}
+
 	// Mise à jour dans l'ordre logique
 	ps.updateInput(deltaTime)
 	ps.updateMovement(deltaTime)
-	ps.updateSprites(deltaTime) // NOUVEAU
+	ps.updateSprites(deltaTime)
 	ps.updateAnimation(deltaTime)
 	ps.updatePlayer(deltaTime)
 	ps.updateCamera()
@@ -251,39 +382,39 @@ func (ps *PlayerSystem) updateInput(deltaTime time.Duration) {
 	if ps.inputManager == nil {
 		return
 	}
-	
+
 	input := ps.player.Input
-	
+
 	// Reset des actions de la frame précédente
 	input.Reset()
-	
+
 	// Actions de mouvement
 	input.MoveUp = ps.inputManager.IsActionPressedSystems(0)    // ActionMoveUp
 	input.MoveDown = ps.inputManager.IsActionPressedSystems(1)  // ActionMoveDown
 	input.MoveLeft = ps.inputManager.IsActionPressedSystems(2)  // ActionMoveLeft
 	input.MoveRight = ps.inputManager.IsActionPressedSystems(3) // ActionMoveRight
-	
+
 	// Actions "just pressed"
-	input.AttackJustPressed = ps.inputManager.IsKeyJustPressedSystems(32)  // Espace
-	input.RollJustPressed = ps.inputManager.IsKeyJustPressedSystems(99)    // C
+	input.AttackJustPressed = ps.inputManager.IsKeyJustPressedSystems(32)    // Espace
+	input.RollJustPressed = ps.inputManager.IsKeyJustPressedSystems(99)      // C
 	input.InteractJustPressed = ps.inputManager.IsKeyJustPressedSystems(101) // E
-	
+
 	// Actions maintenues
 	input.Block = ps.inputManager.IsActionPressedSystems(5) // ActionBlock
 }
 
-// updateSprites met à jour le système de sprites (NOUVEAU)
+// updateSprites met à jour le système de sprites
 func (ps *PlayerSystem) updateSprites(deltaTime time.Duration) {
 	if ps.player == nil || ps.player.SpriteRenderer == nil {
 		return
 	}
-	
+
 	spriteRenderer := ps.player.SpriteRenderer
 	movement := ps.player.Movement
-	
+
 	// Mettre à jour la position du sprite
 	spriteRenderer.Position = ps.player.Position.Position
-	
+
 	// Déterminer la direction
 	var direction string
 	switch movement.FacingDir {
@@ -298,17 +429,18 @@ func (ps *PlayerSystem) updateSprites(deltaTime time.Duration) {
 	default:
 		direction = "down"
 	}
-	
+
 	// Mettre à jour la direction et l'état
 	spriteRenderer.SetDirection(direction, movement.IsMoving)
-	
+
 	// Mettre à jour l'animation du sprite
 	spriteRenderer.Update(deltaTime)
-	
+
 	// Appliquer le flip horizontal pour gauche/droite si nécessaire
-	if direction == "left" {
+	switch direction {
+	case "left":
 		spriteRenderer.FlipX = true
-	} else if direction == "right" {
+	case "right":
 		spriteRenderer.FlipX = false
 	}
 }
@@ -318,22 +450,22 @@ func (ps *PlayerSystem) updateMovement(deltaTime time.Duration) {
 	movement := ps.player.Movement
 	position := ps.player.Position
 	input := ps.player.Input
-	
+
 	dt := deltaTime.Seconds()
-	
+
 	// Calculer le vecteur de mouvement depuis les inputs
 	inputVector := input.GetMovementVector()
-	
+
 	// Appliquer l'accélération ou la friction
 	if inputVector.X != 0 || inputVector.Y != 0 {
 		movement.IsMoving = true
-		
+
 		targetVelocity := inputVector.Mul(movement.Speed)
 		velocityDiff := targetVelocity.Sub(movement.Velocity)
 		acceleration := velocityDiff.Mul(movement.Acceleration * dt)
-		
+
 		movement.Velocity = movement.Velocity.Add(acceleration)
-		
+
 		// Limiter à la vitesse maximale
 		velocityLengthSq := movement.Velocity.X*movement.Velocity.X + movement.Velocity.Y*movement.Velocity.Y
 		if velocityLengthSq > movement.MaxSpeed*movement.MaxSpeed {
@@ -341,13 +473,13 @@ func (ps *PlayerSystem) updateMovement(deltaTime time.Duration) {
 			movement.Velocity.X *= invLength
 			movement.Velocity.Y *= invLength
 		}
-		
+
 		movement.Direction = ps.vectorToDirection(inputVector)
 		movement.FacingDir = movement.Direction
-		
+
 	} else {
 		movement.IsMoving = false
-		
+
 		velocityLength := math.Sqrt(movement.Velocity.X*movement.Velocity.X + movement.Velocity.Y*movement.Velocity.Y)
 		if velocityLength > 0 {
 			frictionMagnitude := movement.Friction * dt
@@ -360,10 +492,10 @@ func (ps *PlayerSystem) updateMovement(deltaTime time.Duration) {
 			}
 		}
 	}
-	
+
 	position.LastPosition = position.Position
 	position.Position = position.Position.Add(movement.Velocity.Mul(dt))
-	
+
 	ps.applyScreenBounds()
 }
 
@@ -372,21 +504,21 @@ func (ps *PlayerSystem) vectorToDirection(vector components.Vector2) components.
 	if vector.X == 0 && vector.Y == 0 {
 		return components.DirectionNone
 	}
-	
+
 	if vector.X == 0 {
 		if vector.Y < 0 {
 			return components.DirectionUp
 		}
 		return components.DirectionDown
 	}
-	
+
 	if vector.Y == 0 {
 		if vector.X < 0 {
 			return components.DirectionLeft
 		}
 		return components.DirectionRight
 	}
-	
+
 	if vector.X < 0 && vector.Y < 0 {
 		return components.DirectionUpLeft
 	}
@@ -403,13 +535,13 @@ func (ps *PlayerSystem) vectorToDirection(vector components.Vector2) components.
 func (ps *PlayerSystem) applyScreenBounds() {
 	position := ps.player.Position
 	size := ps.player.Sprite.Size
-	
+
 	const margin = 16
 	minX := margin + size.X/2
 	maxX := 1280 - margin - size.X/2
 	minY := margin + size.Y/2
 	maxY := 720 - margin - size.Y/2
-	
+
 	if position.Position.X < minX {
 		position.Position.X = minX
 		ps.player.Movement.Velocity.X = 0
@@ -417,7 +549,7 @@ func (ps *PlayerSystem) applyScreenBounds() {
 		position.Position.X = maxX
 		ps.player.Movement.Velocity.X = 0
 	}
-	
+
 	if position.Position.Y < minY {
 		position.Position.Y = minY
 		ps.player.Movement.Velocity.Y = 0
@@ -432,7 +564,7 @@ func (ps *PlayerSystem) updateAnimation(deltaTime time.Duration) {
 	animation := ps.player.Animation
 	movement := ps.player.Movement
 	sprite := ps.player.Sprite
-	
+
 	// Choisir l'animation appropriée
 	var targetAnim string
 	if movement.IsMoving {
@@ -440,25 +572,25 @@ func (ps *PlayerSystem) updateAnimation(deltaTime time.Duration) {
 	} else {
 		targetAnim = "idle"
 	}
-	
+
 	// Changer d'animation si nécessaire
 	if !animation.IsPlaying(targetAnim) {
 		animation.Play(targetAnim)
 	}
-	
+
 	// Mettre à jour l'animation de fallback
 	if animation.Playing {
 		animation.ElapsedTime += deltaTime
-		
+
 		currentAnimation := animation.Animations[animation.CurrentAnim]
 		if currentAnimation != nil && len(currentAnimation.Frames) > 0 {
 			currentFrame := &currentAnimation.Frames[animation.CurrentFrame]
 			frameDuration := time.Duration(float64(currentFrame.Duration) / animation.PlayRate)
-			
+
 			if animation.ElapsedTime >= frameDuration {
 				animation.ElapsedTime = 0
 				animation.CurrentFrame++
-				
+
 				if animation.CurrentFrame >= len(currentAnimation.Frames) {
 					if currentAnimation.Loop {
 						animation.CurrentFrame = 0
@@ -471,22 +603,22 @@ func (ps *PlayerSystem) updateAnimation(deltaTime time.Duration) {
 					}
 				}
 			}
-			
+
 			frame := animation.GetCurrentFrame()
 			if frame != nil {
 				sprite.SourceRect = frame.SourceRect
 			}
 		}
 	}
-	
+
 	// Appliquer le flip horizontal selon la direction
-	if movement.FacingDir == components.DirectionLeft || 
-	   movement.FacingDir == components.DirectionUpLeft || 
-	   movement.FacingDir == components.DirectionDownLeft {
+	if movement.FacingDir == components.DirectionLeft ||
+		movement.FacingDir == components.DirectionUpLeft ||
+		movement.FacingDir == components.DirectionDownLeft {
 		sprite.FlipX = true
-	} else if movement.FacingDir == components.DirectionRight || 
-	          movement.FacingDir == components.DirectionUpRight || 
-	          movement.FacingDir == components.DirectionDownRight {
+	} else if movement.FacingDir == components.DirectionRight ||
+		movement.FacingDir == components.DirectionUpRight ||
+		movement.FacingDir == components.DirectionDownRight {
 		sprite.FlipX = false
 	}
 }
@@ -502,19 +634,19 @@ func (ps *PlayerSystem) handlePlayerActions() {
 	if !ps.player.Player.IsAlive() {
 		return
 	}
-	
+
 	input := ps.player.Input
-	
+
 	if input.AttackJustPressed {
 		if ps.TryAttack() && ps.player.SpriteRenderer != nil {
-			ps.player.SpriteRenderer.StartAttack() // NOUVEAU: déclencher animation d'attaque
+			ps.player.SpriteRenderer.StartAttack()
 		}
 	}
-	
+
 	if input.RollJustPressed {
 		ps.TryRoll()
 	}
-	
+
 	if input.InteractJustPressed {
 		ps.TryInteract()
 	}
@@ -525,7 +657,7 @@ func (ps *PlayerSystem) updateCamera() {
 	if ps.camera == nil {
 		return
 	}
-	
+
 	offset := components.Vector2{X: 0, Y: -20}
 	ps.camera.FollowTarget(ps.player, 3.0, offset)
 }
@@ -535,44 +667,100 @@ func (ps *PlayerSystem) Render(renderer Renderer) {
 	if ps.player == nil || !ps.player.Active {
 		return
 	}
-	
+
 	// Essayer d'abord le rendu avec sprites
 	if ps.renderWithSprites(renderer) {
 		return
 	}
-	
+
 	// Fallback vers le rendu rectangulaire
 	ps.renderFallback(renderer)
 }
 
-// renderWithSprites tente le rendu avec les vrais sprites
+// renderWithSprites tente le rendu avec les vrais sprites chargés
 func (ps *PlayerSystem) renderWithSprites(renderer Renderer) bool {
-	if ps.player.PlayerSprites == nil || ps.player.SpriteRenderer == nil {
+	// Debug seulement toutes les 60 frames pour éviter le spam
+	debug := ps.frameCount%60 == 0
+
+	if ps.player.PlayerSprites == nil {
+		if debug {
+			fmt.Println("DEBUG: PlayerSprites est nil")
+		}
 		return false
 	}
-	
+
+	if ps.player.SpriteRenderer == nil {
+		if debug {
+			fmt.Println("DEBUG: SpriteRenderer est nil")
+		}
+		return false
+	}
+
 	spriteRenderer := ps.player.SpriteRenderer
 	if !spriteRenderer.Visible {
+		if debug {
+			fmt.Println("DEBUG: SpriteRenderer n'est pas visible")
+		}
 		return false
 	}
-	
+
+	// Caster vers PlayerSpriteSet
+	playerSprites, ok := ps.player.PlayerSprites.(*PlayerSpriteSet)
+	if !ok {
+		if debug {
+			fmt.Printf("DEBUG: Mauvais type PlayerSprites: %T\n", ps.player.PlayerSprites)
+		}
+		return false
+	}
+
+	// Vérifier qu'on a au moins le sprite principal
+	if playerSprites.MainSprite == nil {
+		if debug {
+			fmt.Println("DEBUG: MainSprite est nil")
+		}
+		return false
+	}
+
+	if debug {
+		fmt.Println("DEBUG: ✓ Rendu avec sprite principal")
+	}
+
+	// Utiliser le sprite principal
+	currentSprite := playerSprites.MainSprite
+
+	// Préparer les paramètres de rendu
+	position := spriteRenderer.Position
+	spriteBounds := currentSprite.Bounds()
+	sourceRect := components.Rectangle{
+		X:      0,
+		Y:      0,
+		Width:  float64(spriteBounds.Dx()),
+		Height: float64(spriteBounds.Dy()),
+	}
+
+	scale := spriteRenderer.Scale
+	rotation := spriteRenderer.Rotation
+	tint := spriteRenderer.Tint
+
 	// Vérifier si le renderer supporte DrawSprite
 	if spriteRenderer, ok := renderer.(interface {
 		DrawSprite(sprite interface{}, position components.Vector2, sourceRect components.Rectangle, scale components.Vector2, rotation float64, tint components.Color)
 	}); ok {
-		
-		position := ps.player.SpriteRenderer.Position
-		sourceRect := ps.player.SpriteRenderer.SourceRect
-		scale := ps.player.SpriteRenderer.Scale
-		rotation := ps.player.SpriteRenderer.Rotation
-		tint := ps.player.SpriteRenderer.Tint
-		
-		// Utiliser le sprite principal pour l'instant
-		spriteRenderer.DrawSprite(nil, position, sourceRect, scale, rotation, tint)
-		
+
+		if debug {
+			fmt.Printf("DEBUG: Rendu sprite - pos(%.1f,%.1f), taille(%dx%d)\n",
+				position.X, position.Y, spriteBounds.Dx(), spriteBounds.Dy())
+		}
+
+		// Dessiner le sprite réel
+		spriteRenderer.DrawSprite(currentSprite, position, sourceRect, scale, rotation, tint)
+
 		return true
 	}
-	
+
+	if debug {
+		fmt.Println("DEBUG: Renderer ne supporte pas DrawSprite")
+	}
 	return false
 }
 
@@ -581,45 +769,45 @@ func (ps *PlayerSystem) renderFallback(renderer Renderer) {
 	if !ps.player.Sprite.Visible {
 		return
 	}
-	
+
 	position := ps.player.Position.Position
 	sprite := ps.player.Sprite
-	
+
 	playerRect := components.Rectangle{
 		X:      position.X - sprite.Size.X/2 + sprite.Offset.X,
 		Y:      position.Y - sprite.Size.Y/2 + sprite.Offset.Y,
 		Width:  sprite.Size.X,
 		Height: sprite.Size.Y,
 	}
-	
+
 	color := sprite.Color
 	if ps.player.Movement.IsMoving {
 		color = components.Color{
-			R: minByte(sprite.Color.R + 30, 255),
-			G: minByte(sprite.Color.G + 30, 255),
-			B: minByte(sprite.Color.B + 30, 255),
+			R: minByte(sprite.Color.R+30, 255),
+			G: minByte(sprite.Color.G+30, 255),
+			B: minByte(sprite.Color.B+30, 255),
 			A: sprite.Color.A,
 		}
 	}
-	
+
 	if ps.player.Player.InvulnTime > 0 {
 		if (ps.player.Player.InvulnTime.Milliseconds()/100)%2 == 0 {
 			color.A = 128
 		}
 	}
-	
+
 	renderer.DrawRectangle(playerRect, color, true)
-	
+
 	borderColor := components.ColorWhite
 	if ps.player.Player.InvulnTime > 0 {
 		borderColor = components.ColorYellow
 	}
 	renderer.DrawRectangle(playerRect, borderColor, false)
-	
+
 	if ps.player.Movement.IsMoving {
 		ps.renderDirectionIndicator(renderer, position)
 	}
-	
+
 	ps.renderHealthBar(renderer, position)
 	ps.renderStaminaBar(renderer, position)
 }
@@ -630,16 +818,16 @@ func (ps *PlayerSystem) renderDirectionIndicator(renderer Renderer, position com
 	if direction == components.DirectionNone {
 		return
 	}
-	
+
 	arrowLength := 15.0
 	dirVector := direction.ToVector2()
 	arrowEnd := position.Add(dirVector.Mul(arrowLength))
-	
+
 	if dirVector.X != 0 {
 		arrowRect := components.Rectangle{
 			X:      math.Min(position.X, arrowEnd.X) - 1,
 			Y:      position.Y - 1,
-			Width:  math.Abs(arrowEnd.X - position.X) + 2,
+			Width:  math.Abs(arrowEnd.X-position.X) + 2,
 			Height: 2,
 		}
 		renderer.DrawRectangle(arrowRect, components.ColorYellow, true)
@@ -649,7 +837,7 @@ func (ps *PlayerSystem) renderDirectionIndicator(renderer Renderer, position com
 			X:      position.X - 1,
 			Y:      math.Min(position.Y, arrowEnd.Y) - 1,
 			Width:  2,
-			Height: math.Abs(arrowEnd.Y - position.Y) + 2,
+			Height: math.Abs(arrowEnd.Y-position.Y) + 2,
 		}
 		renderer.DrawRectangle(arrowRect, components.ColorYellow, true)
 	}
@@ -658,18 +846,18 @@ func (ps *PlayerSystem) renderDirectionIndicator(renderer Renderer, position com
 // renderHealthBar dessine une barre de vie
 func (ps *PlayerSystem) renderHealthBar(renderer Renderer, position components.Vector2) {
 	player := ps.player.Player
-	
+
 	barWidth := 30.0
 	barHeight := 4.0
 	barY := position.Y - ps.player.Sprite.Size.Y/2 - 8
 	barX := position.X - barWidth/2
-	
+
 	bgRect := components.Rectangle{X: barX, Y: barY, Width: barWidth, Height: barHeight}
 	renderer.DrawRectangle(bgRect, components.ColorBlack, true)
-	
+
 	healthPercent := float64(player.Health) / float64(player.MaxHealth)
 	healthWidth := barWidth * healthPercent
-	
+
 	var healthColor components.Color
 	if healthPercent > 0.6 {
 		healthColor = components.ColorGreen
@@ -678,35 +866,35 @@ func (ps *PlayerSystem) renderHealthBar(renderer Renderer, position components.V
 	} else {
 		healthColor = components.ColorRed
 	}
-	
+
 	if healthWidth > 0 {
 		healthRect := components.Rectangle{X: barX, Y: barY, Width: healthWidth, Height: barHeight}
 		renderer.DrawRectangle(healthRect, healthColor, true)
 	}
-	
+
 	renderer.DrawRectangle(bgRect, components.ColorWhite, false)
 }
 
 // renderStaminaBar dessine une barre de stamina
 func (ps *PlayerSystem) renderStaminaBar(renderer Renderer, position components.Vector2) {
 	player := ps.player.Player
-	
+
 	barWidth := 30.0
 	barHeight := 3.0
 	barY := position.Y - ps.player.Sprite.Size.Y/2 - 14
 	barX := position.X - barWidth/2
-	
+
 	bgRect := components.Rectangle{X: barX, Y: barY, Width: barWidth, Height: barHeight}
 	renderer.DrawRectangle(bgRect, components.ColorBlack, true)
-	
+
 	staminaPercent := player.Stamina / player.MaxStamina
 	staminaWidth := barWidth * staminaPercent
-	
+
 	if staminaWidth > 0 {
 		staminaRect := components.Rectangle{X: barX, Y: barY, Width: staminaWidth, Height: barHeight}
 		renderer.DrawRectangle(staminaRect, components.ColorCyan, true)
 	}
-	
+
 	renderer.DrawRectangle(bgRect, components.ColorGray, false)
 }
 
@@ -719,13 +907,13 @@ func (ps *PlayerSystem) TryAttack() bool {
 	if ps.player == nil || !ps.player.Player.IsAlive() {
 		return false
 	}
-	
+
 	staminaCost := 15.0
 	if !ps.player.Player.UseStamina(staminaCost) {
 		fmt.Println("Pas assez de stamina pour attaquer!")
 		return false
 	}
-	
+
 	fmt.Println("Attaque réussie!")
 	return true
 }
@@ -735,24 +923,24 @@ func (ps *PlayerSystem) TryRoll() bool {
 	if ps.player == nil || !ps.player.Player.IsAlive() {
 		return false
 	}
-	
+
 	staminaCost := 25.0
 	if !ps.player.Player.UseStamina(staminaCost) {
 		fmt.Println("Pas assez de stamina pour rouler!")
 		return false
 	}
-	
+
 	rollDirection := ps.player.Movement.Direction
 	if rollDirection == components.DirectionNone {
 		rollDirection = ps.player.Movement.FacingDir
 	}
-	
+
 	rollSpeed := 400.0
 	rollVector := rollDirection.ToVector2().Mul(rollSpeed)
 	ps.player.Movement.Velocity = rollVector
-	
+
 	ps.player.Player.InvulnTime = time.Millisecond * 300
-	
+
 	fmt.Println("Roulade effectuée!")
 	return true
 }
@@ -762,7 +950,7 @@ func (ps *PlayerSystem) TryInteract() bool {
 	if ps.player == nil || !ps.player.Player.IsAlive() {
 		return false
 	}
-	
+
 	fmt.Println("Interaction (rien à proximité)")
 	return false
 }
